@@ -1,0 +1,40 @@
+---
+# Change only this value to deploy a different Ollama model.
+ollama_model: "qwen2.5:7b"
+
+# Secrets: leave empty here and pass through an encrypted vault file.
+api_username: "llm-api"
+api_password: ""
+api_password_salt: "gpuLLM2026"
+
+# Network policy. Use your office/VPN CIDR; never use 0.0.0.0/0 in production.
+trusted_api_cidrs:
+  - "192.0.2.0/24"
+ssh_port: 22
+api_port: 8443
+
+# Driver installation is automatic. Set e.g. nvidia-driver-570 to pin a package.
+nvidia_driver_package: "auto"
+reboot_after_driver_install: true
+reboot_timeout: 900
+
+docker_users: []
+llm_stack_dir: "/opt/gpu-llm"
+ollama_image: "ollama/ollama:latest"
+ollama_keep_alive: "10m"
+ollama_num_parallel: 1
+ollama_max_loaded_models: 1
+model_pull_timeout: 3600
+model_test_timeout: 600
+
+monitoring_enabled: true
+dcgm_exporter_image: "nvcr.io/nvidia/k8s/dcgm-exporter:4.6.0-4.8.3-distroless"
+prometheus_image: "prom/prometheus:latest"
+prometheus_retention: "15d"
+
+# Empty paths generate a local self-signed certificate. For production, set
+# both to controller-side PEM files issued by your CA.
+nginx_tls_cert_src: ""
+nginx_tls_key_src: ""
+self_signed_cert_days: 365
+

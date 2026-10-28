@@ -1,0 +1,29 @@
+---
+- name: Provision NVIDIA GPU server and private LLM API
+  hosts: gpu_servers
+  become: true
+  gather_facts: true
+
+  pre_tasks:
+    - name: Validate target and required variables
+      ansible.builtin.assert:
+        that:
+          - ansible_distribution == 'Ubuntu'
+          - ansible_distribution_version is version('22.04', '>=')
+          - api_password | length >= 16
+          - api_password != 'CHANGE_ME'
+          - trusted_api_cidrs | length > 0
+          - (nginx_tls_cert_src | length == 0) == (nginx_tls_key_src | length == 0)
+        fail_msg: >-
+          Ubuntu 22.04+ is required. Set a strong api_password (preferably in
+          Ansible Vault), at least one trusted_api_cidrs entry, and either both
+          TLS source paths or neither.
+      no_log: true
+
+  roles:
+    - role: base
+    - role: nvidia_driver
+    - role: docker
+    - role: firewall
+    - role: llm_stack
+

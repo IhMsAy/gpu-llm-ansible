@@ -1,0 +1,42 @@
+limit_req_zone $binary_remote_addr zone=llm_api:10m rate=10r/s;
+
+server {
+    listen {{ api_port }} ssl;
+    listen [::]:{{ api_port }} ssl;
+    server_name _;
+
+    ssl_certificate     /etc/nginx/tls/llm-api.crt;
+    ssl_certificate_key /etc/nginx/tls/llm-api.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_session_cache shared:SSL:10m;
+
+    client_max_body_size 10m;
+    proxy_read_timeout 600s;
+    proxy_send_timeout 600s;
+
+    auth_basic "Private LLM API";
+    auth_basic_user_file /etc/nginx/.htpasswd-llm;
+
+    location / {
+        limit_req zone=llm_api burst=20 nodelay;
+        proxy_pass http://127.0.0.1:11434;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+    }
+
+{% if monitoring_enabled | bool %}
+    location /prometheus/ {
+        proxy_pass http://127.0.0.1:9090;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location = /metrics/gpu {
+        proxy_pass http://127.0.0.1:9400/metrics;
+    }
+{% endif %}
+}
+

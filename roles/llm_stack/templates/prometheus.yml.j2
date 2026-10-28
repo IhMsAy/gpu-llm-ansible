@@ -1,0 +1,17 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/gpu-alerts.yml
+
+scrape_configs:
+  - job_name: dcgm
+    static_configs:
+      - targets: ["dcgm-exporter:9400"]
+
+  - job_name: prometheus
+    metrics_path: /prometheus/metrics
+    static_configs:
+      - targets: ["localhost:9090"]
+

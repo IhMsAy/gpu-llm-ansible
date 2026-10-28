@@ -1,0 +1,4 @@
+---
+# Copy to vault.yml, replace the value, then encrypt with ansible-vault.
+api_password: "replace-with-a-long-random-password"
+

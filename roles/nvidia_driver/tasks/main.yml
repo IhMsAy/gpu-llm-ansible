@@ -1,0 +1,46 @@
+---
+- name: Check whether NVIDIA driver is working
+  ansible.builtin.command: nvidia-smi
+  register: nvidia_smi_before
+  changed_when: false
+  failed_when: false
+
+- name: Install recommended NVIDIA driver
+  ansible.builtin.command: ubuntu-drivers install
+  register: nvidia_driver_auto_install
+  when:
+    - nvidia_smi_before.rc != 0
+    - nvidia_driver_package == 'auto'
+
+- name: Install pinned NVIDIA driver package
+  ansible.builtin.apt:
+    name: "{{ nvidia_driver_package }}"
+    state: present
+    update_cache: true
+  register: nvidia_driver_pinned_install
+  when:
+    - nvidia_smi_before.rc != 0
+    - nvidia_driver_package != 'auto'
+
+- name: Reboot after NVIDIA driver installation
+  ansible.builtin.reboot:
+    msg: "Reboot initiated by Ansible after NVIDIA driver installation"
+    reboot_timeout: "{{ reboot_timeout }}"
+    post_reboot_delay: 15
+  when:
+    - reboot_after_driver_install | bool
+    - nvidia_smi_before.rc != 0
+    - (nvidia_driver_auto_install is changed) or (nvidia_driver_pinned_install is changed)
+
+- name: Verify NVIDIA driver after installation
+  ansible.builtin.command: nvidia-smi
+  register: nvidia_smi_after
+  changed_when: false
+  retries: 5
+  delay: 10
+  until: nvidia_smi_after.rc == 0
+
+- name: Show detected GPU summary
+  ansible.builtin.debug:
+    msg: "{{ nvidia_smi_after.stdout_lines[:8] }}"
+

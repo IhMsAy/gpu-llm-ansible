@@ -1,0 +1,72 @@
+services:
+  ollama:
+    image: {{ ollama_image }}
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_HOST: "0.0.0.0:11434"
+      OLLAMA_KEEP_ALIVE: "{{ ollama_keep_alive }}"
+      OLLAMA_NUM_PARALLEL: "{{ ollama_num_parallel }}"
+      OLLAMA_MAX_LOADED_MODELS: "{{ ollama_max_loaded_models }}"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+{% if monitoring_enabled | bool %}
+  dcgm-exporter:
+    image: {{ dcgm_exporter_image }}
+    container_name: dcgm-exporter
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9400:9400"
+    cap_add:
+      - SYS_ADMIN
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      - ./dcgm-counters.csv:/etc/dcgm-exporter/custom.csv:ro
+    command: ["--collectors", "/etc/dcgm-exporter/custom.csv"]
+
+  prometheus:
+    image: {{ prometheus_image }}
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/gpu-alerts.yml:/etc/prometheus/gpu-alerts.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time={{ prometheus_retention }}
+      - --web.external-url=https://{{ inventory_hostname }}:{{ api_port }}/prometheus/
+      - --web.route-prefix=/prometheus/
+{% endif %}
+
+volumes:
+  ollama_data:
+{% if monitoring_enabled | bool %}
+  prometheus_data:
+{% endif %}
+

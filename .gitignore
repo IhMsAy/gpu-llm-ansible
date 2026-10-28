@@ -1,0 +1,5 @@
+inventory.yml
+vault.yml
+*.retry
+.vault-password
+

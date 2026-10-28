@@ -1,0 +1,199 @@
+---
+- name: Create LLM stack directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ llm_stack_dir }}", mode: "0750" }
+    - { path: "{{ llm_stack_dir }}/prometheus", mode: "0750" }
+    - { path: "/etc/nginx/tls", mode: "0750" }
+
+- name: Install supplied TLS certificate
+  ansible.builtin.copy:
+    src: "{{ nginx_tls_cert_src }}"
+    dest: /etc/nginx/tls/llm-api.crt
+    owner: root
+    group: root
+    mode: "0644"
+  when: nginx_tls_cert_src | length > 0
+  notify: Reload Nginx
+
+- name: Install supplied TLS private key
+  ansible.builtin.copy:
+    src: "{{ nginx_tls_key_src }}"
+    dest: /etc/nginx/tls/llm-api.key
+    owner: root
+    group: root
+    mode: "0600"
+  when: nginx_tls_key_src | length > 0
+  notify: Reload Nginx
+
+- name: Generate self-signed TLS certificate when no certificate is supplied
+  ansible.builtin.command:
+    argv:
+      - openssl
+      - req
+      - -x509
+      - -newkey
+      - rsa:3072
+      - -sha256
+      - -nodes
+      - -days
+      - "{{ self_signed_cert_days | string }}"
+      - -subj
+      - "/CN={{ inventory_hostname }}"
+      - -addext
+      - "subjectAltName=DNS:{{ inventory_hostname }},IP:{{ ansible_default_ipv4.address }}"
+      - -keyout
+      - /etc/nginx/tls/llm-api.key
+      - -out
+      - /etc/nginx/tls/llm-api.crt
+    creates: /etc/nginx/tls/llm-api.crt
+  when: nginx_tls_cert_src | length == 0
+  notify: Reload Nginx
+
+- name: Hash API password for Nginx
+  ansible.builtin.command:
+    argv: [openssl, passwd, "-6", "-salt", "{{ api_password_salt }}", "-stdin"]
+    stdin: "{{ api_password }}"
+  register: api_password_hash
+  changed_when: false
+  no_log: true
+
+- name: Install Nginx password file
+  ansible.builtin.copy:
+    dest: /etc/nginx/.htpasswd-llm
+    content: "{{ api_username }}:{{ api_password_hash.stdout }}\n"
+    owner: root
+    group: www-data
+    mode: "0640"
+  no_log: true
+  notify: Reload Nginx
+
+- name: Install Nginx LLM API reverse proxy
+  ansible.builtin.template:
+    src: nginx-llm.conf.j2
+    dest: /etc/nginx/sites-available/llm-api.conf
+    mode: "0644"
+  notify: Reload Nginx
+
+- name: Enable Nginx LLM API site
+  ansible.builtin.file:
+    src: /etc/nginx/sites-available/llm-api.conf
+    dest: /etc/nginx/sites-enabled/llm-api.conf
+    state: link
+  notify: Reload Nginx
+
+- name: Disable default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload Nginx
+
+- name: Install Prometheus configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: "{{ llm_stack_dir }}/prometheus/prometheus.yml"
+    mode: "0644"
+  notify: Restart LLM stack
+
+- name: Install GPU alert rules
+  ansible.builtin.copy:
+    src: gpu-alerts.yml
+    dest: "{{ llm_stack_dir }}/prometheus/gpu-alerts.yml"
+    mode: "0644"
+  notify: Restart LLM stack
+
+- name: Install DCGM metric selection
+  ansible.builtin.copy:
+    src: dcgm-counters.csv
+    dest: "{{ llm_stack_dir }}/dcgm-counters.csv"
+    mode: "0644"
+  notify: Restart LLM stack
+
+- name: Install Docker Compose stack
+  ansible.builtin.template:
+    src: compose.yml.j2
+    dest: "{{ llm_stack_dir }}/compose.yml"
+    mode: "0644"
+  notify: Restart LLM stack
+
+- name: Validate Nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Apply service configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Start LLM stack
+  ansible.builtin.command:
+    argv: [docker, compose, -f, "{{ llm_stack_dir }}/compose.yml", up, -d, --remove-orphans]
+  register: compose_up
+  changed_when: "'Started' in compose_up.stdout or 'Created' in compose_up.stdout or 'Recreated' in compose_up.stdout"
+
+- name: Wait for Ollama API on loopback
+  ansible.builtin.uri:
+    url: http://127.0.0.1:11434/api/tags
+    method: GET
+    status_code: 200
+  register: ollama_ready
+  retries: 30
+  delay: 5
+  until: ollama_ready.status == 200
+
+- name: Check whether requested model is already present
+  ansible.builtin.command:
+    argv: [docker, exec, ollama, ollama, show, "{{ ollama_model }}"]
+  register: ollama_model_present
+  changed_when: false
+  failed_when: false
+
+- name: Pull requested Ollama model
+  ansible.builtin.command:
+    argv: [docker, exec, ollama, ollama, pull, "{{ ollama_model }}"]
+  when: ollama_model_present.rc != 0
+  timeout: "{{ model_pull_timeout }}"
+
+- name: Verify model inference through private backend
+  ansible.builtin.uri:
+    url: http://127.0.0.1:11434/api/generate
+    method: POST
+    body_format: json
+    body:
+      model: "{{ ollama_model }}"
+      prompt: "Reply with exactly: OK"
+      stream: false
+    status_code: 200
+    return_content: true
+    timeout: "{{ model_test_timeout }}"
+  register: model_test
+  failed_when: model_test.status != 200 or model_test.json.response is not defined
+
+- name: Verify authenticated public API locally
+  ansible.builtin.uri:
+    url: "https://127.0.0.1:{{ api_port }}/api/tags"
+    method: GET
+    user: "{{ api_username }}"
+    password: "{{ api_password }}"
+    force_basic_auth: true
+    validate_certs: false
+    status_code: 200
+  no_log: true
+
+- name: Verify DCGM metrics
+  ansible.builtin.uri:
+    url: http://127.0.0.1:9400/metrics
+    method: GET
+    status_code: 200
+    return_content: true
+  register: dcgm_metrics
+  retries: 12
+  delay: 5
+  until:
+    - dcgm_metrics.status == 200
+    - "'DCGM_FI_DEV_GPU_UTIL' in dcgm_metrics.content"
+  when: monitoring_enabled | bool
+

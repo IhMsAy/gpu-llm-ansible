@@ -1,0 +1,28 @@
+---
+- name: Allow SSH before enabling firewall
+  community.general.ufw:
+    rule: allow
+    port: "{{ ssh_port }}"
+    proto: tcp
+    comment: SSH managed by Ansible
+
+- name: Allow authenticated API only from trusted networks
+  community.general.ufw:
+    rule: allow
+    port: "{{ api_port }}"
+    proto: tcp
+    src: "{{ item }}"
+    comment: Private LLM API
+  loop: "{{ trusted_api_cidrs }}"
+
+- name: Enable UFW with inbound deny policy
+  community.general.ufw:
+    state: enabled
+    direction: incoming
+    policy: deny
+
+- name: Set default outbound allow policy
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+

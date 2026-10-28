@@ -1,0 +1,12 @@
+---
+- name: Reload Nginx
+  ansible.builtin.systemd:
+    name: nginx
+    enabled: true
+    state: reloaded
+
+- name: Restart LLM stack
+  ansible.builtin.command:
+    argv: [docker, compose, -f, "{{ llm_stack_dir }}/compose.yml", up, -d, --remove-orphans, --force-recreate]
+  changed_when: true
+

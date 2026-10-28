@@ -1,0 +1,22 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - openssl
+      - python3
+      - ubuntu-drivers-common
+      - ufw
+      - nginx
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable time synchronization
+  ansible.builtin.systemd:
+    name: systemd-timesyncd
+    enabled: true
+    state: started
+

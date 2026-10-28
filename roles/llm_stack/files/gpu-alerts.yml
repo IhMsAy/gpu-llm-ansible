@@ -1,0 +1,25 @@
+groups:
+  - name: gpu-health
+    rules:
+      - alert: GpuHighTemperature
+        expr: DCGM_FI_DEV_GPU_TEMP_CELSIUS > 85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU temperature is above 85 C"
+      - alert: GpuMemoryNearlyFull
+        expr: 100 * DCGM_FI_DEV_FB_USED / DCGM_FI_DEV_FB_TOTAL > 95
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "GPU framebuffer memory usage is above 95%"
+      - alert: DcgmExporterDown
+        expr: up{job="dcgm"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "DCGM Exporter is unavailable"
+
